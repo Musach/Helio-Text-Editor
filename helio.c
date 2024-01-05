@@ -237,6 +237,9 @@ int ReadKeypress()
     typically indicating a program termination. Directs other keypresses to specific functions for
     further processing (e.g., arrow keys to MoveCursor() function).
 
+    PAGE_UP and PAGE_DOWN go up or down a page respectively by calling MoveCursor iteratively. HOME
+    sends cursorX to the beginning of a line while END sends it to the end of a line.
+
     Dependencies:
     - ReadKeyPress
 **************************************************************************************************/
@@ -254,11 +257,22 @@ int ProcessKeypress(TerminalAttr *attr)
     case DOWN_ARROW:
     case RIGHT_ARROW:
     case LEFT_ARROW:
-    case PAGE_UP:
-    case PAGE_DOWN:
-    case HOME_KEY:
-    case END_KEY:
         MoveCursor(attr, key);
+        break;
+
+    case PAGE_UP:                                   // moves a whole page up
+    case PAGE_DOWN:                                 // moves a whole page down
+                                                    // goes to begnning of or end of next page by calling MoveCursor iteratively
+        for (int i = 0; i < attr->numRows - 1; i++) // iterates one whole page length
+            // delegates scrolling to MoveCursor by simulating an up or down arrow key
+            MoveCursor(attr, key == PAGE_UP ? UP_ARROW : DOWN_ARROW); // if page up -> UP_ARROW else - > DOWN_ARROW
+        break;
+    case HOME_KEY: // moves cursorX to beggining of the sline
+        attr->cursorX = 0;
+        break;
+    case END_KEY: // moves cursorX to end of the line
+        attr->cursorX = attr->tRow[attr->cursorY + attr->rowOffset].rendSize;
+        break;
     }
 
     return 1;
@@ -286,9 +300,9 @@ void MoveCursor(TerminalAttr *attr, int key)
 {
     int txtLen;
 
-    if (attr->cursorY < attr->tRowsTot) // checks if current row has text
+    if (attr->cursorY < attr->tRowsTot)                                // checks if current row has text
         txtLen = attr->tRow[attr->cursorY + attr->rowOffset].rendSize; // calc size of curr row
-    else // used for rows with no text (tilde rows) and is also a default size value for a file with no text
+    else                                                               // used for rows with no text (tilde rows) and is also a default size value for a file with no text
         txtLen = 0;
 
     switch (key)
@@ -332,24 +346,11 @@ void MoveCursor(TerminalAttr *attr, int key)
         else
             attr->cursorX--;
         break;
-
-    case PAGE_UP:
-        attr->cursorY = 0;
-        break;
-    case PAGE_DOWN:
-        attr->cursorY = attr->numRows - 1;
-        break;
-    case HOME_KEY:
-        attr->cursorX = 0;
-        break;
-    case END_KEY:
-        attr->cursorX = attr->numCols - 1;
-        break;
     }
 
-    if (attr->cursorY < attr->tRowsTot) // checks if current row has text
+    if (attr->cursorY < attr->tRowsTot)                                // checks if current row has text
         txtLen = attr->tRow[attr->cursorY + attr->rowOffset].rendSize; // calc size of curr row
-    else // used for rows with no text (tilde rows) and is also a default size value for a file with no text
+    else                                                               // used for rows with no text (tilde rows) and is also a default size value for a file with no text
         txtLen = 0;
 
     attr->maxColOffset = txtLen - attr->numCols + 1; // calculate max col offset
@@ -390,11 +391,11 @@ void Scroll(TerminalAttr *attr, int key)
         break;
     case RIGHT_ARROW:
         // if (attr->colOffset < attr->maxColOffset) // makes sure colOffset doesn't exceed the max offset (redundant)
-            attr->colOffset += 1;
+        attr->colOffset += 1;
         break;
     case LEFT_ARROW:
         // if (attr->colOffset > 0) // makes sure colOffset doesn't go below min offset (redundant)
-            attr->colOffset -= 1;
+        attr->colOffset -= 1;
         break;
     }
 }
@@ -662,7 +663,7 @@ void ErrorHandler(const char *str)
 /**************************************************************************************************
     Description:
     Turns on raw mode; a terminal mode in which input characters are read immediately and output
-    characters are sent directly to the screen. It does so by turning on and off certain flags. 
+    characters are sent directly to the screen. It does so by turning on and off certain flags.
     The termios struct given as a prameter is not modified since we passed it by value.
 
     Dependencies:
@@ -710,7 +711,7 @@ void RawModeOff(struct termios originalState)
 
 /**************************************************************************************************
     Description:
-    Gets the window width and length (row and column sizes) by using the winsize struct. To access 
+    Gets the window width and length (row and column sizes) by using the winsize struct. To access
     this struct, we use the ioctl function (both winsize and iocatl are located in <sys/ioctl.h>).
 
     Dependencies:
@@ -721,7 +722,7 @@ int FetchWindowSize(int *numRows, int *numCols)
     struct winsize size;
     // ioctl stands for input output control; it is able to fetch the window size on most systems
     if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == -1) || size.ws_col == 0) // checks for erroneous behaviour
-        return -1; // reports failure to get sizes
+        return -1;                                                           // reports failure to get sizes
     else
     {
         *numRows = size.ws_row;
