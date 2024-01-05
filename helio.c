@@ -65,7 +65,9 @@ typedef struct
 {
     // termios is a data structure that defines the attributes of the terminal
     struct termios originalState;
+
     TerminalRow *tRow; // row of text array
+    int tRowsTot;      // number of rows with text
 
     int cursorX; // cursor x postion
     int cursorY; // cursor y position
@@ -79,7 +81,7 @@ typedef struct
     int maxRowOffset; // keeps track of max permissable vertical scrolling
     int maxColOffset; // keeps track of max permissable horizontal scrolling
 
-    int tRowsTot; // number of rows with text
+    char *fileName; // stores the name of the file opened
 
 } TerminalAttr; // used for storing terminal/window related variables
 
@@ -106,6 +108,7 @@ void RefreshScreen(TerminalAttr *attr);
 void RenderRow(TerminalRow *tRow);
 void Scroll(TerminalAttr *attr, int key);
 void WriteRows(TerminalAttr *attr, AppendBuffer *abuff);
+void WriteStatusBar(TerminalAttr *attr, AppendBuffer *abuff);
 
 //=============================================================//
 //====================Function Declarations====================//
@@ -238,7 +241,7 @@ int ReadKeypress()
     further processing (e.g., arrow keys to MoveCursor() function).
 
     PAGE_UP and PAGE_DOWN go up or down a page respectively by calling MoveCursor iteratively. HOME
-    sends cursorX to the beginning of a line while END sends it to the end of a line.
+    sends cursorX to the beginning of a line while END sends it to the end of the current line.
 
     Dependencies:
     - ReadKeyPress
@@ -416,6 +419,9 @@ void Scroll(TerminalAttr *attr, int key)
 **************************************************************************************************/
 void OpenFile(TerminalAttr *attr, char *fileName)
 {
+    // free(attr->fileName);              // frees any memory so we can use strdup
+    attr->fileName = strdup(fileName); // copies fileName into attr struct's fileName string
+
     FILE *fp = fopen(fileName, "r");
     if (!fp)
         ErrorHandler("fopen"); // manages errors
@@ -600,10 +606,41 @@ void WriteRows(TerminalAttr *attr, AppendBuffer *abuff)
         }
 
         AppendString(abuff, "\x1b[K", 3); // command that clears everything right of the cursor
-
-        if (i < rows - 1)
-            AppendString(abuff, "\r\n", 2); // adds newline for every line except last one (to prevent scrolling)
+        AppendString(abuff, "\r\n", 2);   // adds newline for every line
     }
+}
+
+/**************************************************************************************************
+    Description:
+    Prints the statusBar (last bar on screen) to display information about the file (file name and 
+    row number). If no file is opened and therefore no file name is given, the default is set to 
+    "[No Name]" in InitTerminalAttr. Up to 20 characters of the file name will be shown.
+
+    For the m command, refer to selecting graphic rendition in the VT100 user guide.
+
+    Dependencies:
+    - AppendString
+**************************************************************************************************/
+void WriteStatusBar(TerminalAttr *attr, AppendBuffer *abuff)
+{
+    AppendString(abuff, "\x1b[7m", 4);   // command to display inverted colors (switches black with white)
+    char statusBar1[80], statusBar2[80]; // left side and right side string of the status bar respectively
+    // sets length as well as prints the file name and the number of rows in the file
+    int length1 = snprintf(statusBar1, sizeof(statusBar1), "%.20s - %d Lines", attr->fileName, attr->tRowsTot);
+    // sets length as well as prints the current row the cursor is on as well as the number of rows in the file
+    int length2 = snprintf(statusBar2, sizeof(statusBar2), "%d/%d", attr->cursorY + attr->rowOffset + 1, attr->tRowsTot);
+
+    if (length1 > attr->numCols)
+        length1 = attr->numCols; // makes sure length of statusBar doesn't exceed screen width
+    AppendString(abuff, statusBar1, length1);
+
+    // makes sure it prints spaces until there is exactly enough space left for statusBar2
+    for (int i = length1 + length2; i < attr->numCols; i++)
+        AppendString(abuff, " ", 1); // adds spaces
+
+    AppendString(abuff, statusBar2, length2); // prints right side of statusBar (statusBar2)
+
+    AppendString(abuff, "\x1b[m", 3); // sets display colors back to default
 }
 
 /**************************************************************************************************
@@ -628,7 +665,8 @@ void RefreshScreen(TerminalAttr *attr)
     AppendString(&abuff, "\x1b[?25l", 6); // command to hide the cursor
     AppendString(&abuff, "\x1b[H", 3);    // command to reposition cursor to top-left of screen
 
-    WriteRows(attr, &abuff); // appends rows from file into the append buffer that are supposed to be visible
+    WriteRows(attr, &abuff);      // appends rows from file into the append buffer that are supposed to be visible
+    WriteStatusBar(attr, &abuff); // adds status bar to the very bottom of the display
 
     // moves cursor to specified cursorY and cursorX position (+1 to convert 0-indexed to 1-indexed)
     snprintf(buff, sizeof(buff), "\x1b[%d;%dH", attr->cursorY + 1, attr->cursorX + 1);
@@ -725,7 +763,7 @@ int FetchWindowSize(int *numRows, int *numCols)
         return -1;                                                           // reports failure to get sizes
     else
     {
-        *numRows = size.ws_row;
+        *numRows = size.ws_row - 1; // subtract 1 to account for status bar
         *numCols = size.ws_col;
         return 0; // reports success in getting sizes
     }
@@ -750,6 +788,7 @@ void InitTerminalAttr(TerminalAttr *attr)
     attr->maxColOffset = 0;
     attr->tRowsTot = 0;
     attr->tRow = NULL;
+    attr->fileName = "[fileName]"; // in case no file is opened, set default name to no name
 
     // stores original state attributes; STDIN_FILENO means standard input stream
     if (tcgetattr(STDIN_FILENO, &(attr->originalState)) == -1)
