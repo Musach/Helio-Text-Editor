@@ -1,16 +1,14 @@
 /**************************************************************************************************
  * File: helio.c
- * Description: A text editor program developed in C99, designed to interface with the Linux
- *              terminal. It utilizes escape sequence commands; for reference, consult the
- *              VT100 user guide: http://vt100.net/docs/vt100-ug/chapter3.html
+ * Description:
+ *  - A text editor program developed in C99, designed to interface with the Linux terminal. It
+ *    utilizes escape sequence commands; for reference, consult the VT100 user guide:
+ *    http://vt100.net/docs/vt100-ug/chapter3.html
+ *
  * Sources:
  *  - This project draws inspiration and references from an online tutorial while maintaining
  *    distinct implementation: [Tutorial Link](https://viewsourcecode.org/snaptoken/kilo/04.
  *    aTextViewer.html)
- *
- * Author:
- * Contact:
- * Date:
  *************************************************************************************************/
 
 //====================Includes====================//
@@ -18,15 +16,17 @@
 #define _BSD_SOURCE
 #define _GNU_SOURCE
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <termios.h>
 #include <ctype.h>
 #include <errno.h>
-#include <sys/ioctl.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
+#include <termios.h>
+#include <time.h>
+#include <unistd.h>
 
 //====================Global Declarations====================//
 #define HELIO_VERSION "0.0.1"
@@ -80,6 +80,9 @@ typedef struct
 
     int maxRowOffset; // keeps track of max permissable vertical scrolling
     int maxColOffset; // keeps track of max permissable horizontal scrolling
+
+    char statusMsg[80];
+    time_t statusMsgTime; // from <time.h>
 
     char *fileName; // stores the name of the file opened
 
@@ -612,8 +615,8 @@ void WriteRows(TerminalAttr *attr, AppendBuffer *abuff)
 
 /**************************************************************************************************
     Description:
-    Prints the statusBar (last bar on screen) to display information about the file (file name and 
-    row number). If no file is opened and therefore no file name is given, the default is set to 
+    Prints the statusBar (last bar on screen) to display information about the file (file name and
+    row number). If no file is opened and therefore no file name is given, the default is set to
     "[No Name]" in InitTerminalAttr. Up to 20 characters of the file name will be shown.
 
     For the m command, refer to selecting graphic rendition in the VT100 user guide.
@@ -641,6 +644,47 @@ void WriteStatusBar(TerminalAttr *attr, AppendBuffer *abuff)
     AppendString(abuff, statusBar2, length2); // prints right side of statusBar (statusBar2)
 
     AppendString(abuff, "\x1b[m", 3); // sets display colors back to default
+    AppendString(abuff, "\r\n", 2);   // makes room for status message to be displayed
+}
+
+/**************************************************************************************************
+    Description:
+    This function takes in a variable amount of arguments (like printf), so it is a variadic
+    function. To use such functions, we must use a va_list type. We then input the last argument
+    before "..." into va_start so the next arguments' addresses are known. Then we call vsnprintf to
+    take care of reading and formatting the string. Lastly we call va_end.
+
+    Dependencies:
+    None
+**************************************************************************************************/
+void SetStatusMessage(TerminalAttr *attr, const char *frmt, ...)
+{
+    va_list arguments;
+    va_start(arguments, frmt);                                            // call va_start to provide address of arguments
+    vsnprintf(attr->statusMsg, sizeof(attr->statusMsg), frmt, arguments); // reads and formats the string
+    va_end(arguments);
+
+    attr->statusMsgTime = time(NULL);
+}
+
+/**************************************************************************************************
+    Description:
+    Writes the status message that was set in SetStatusMessage to the append buffer, abuff. It also
+    makes sure that it only display status messages that are less than 5 seconds after a keypress.
+
+    Dependencies:
+    - AppendString
+**************************************************************************************************/
+void WriteStatusMessage(TerminalAttr *attr, AppendBuffer *abuff)
+{
+    AppendString(abuff, "\x1b[k", 3); // clears the current row
+    int length = strlen(attr->statusMsg);
+
+    if (length > attr->numCols) // makes sure string length doesn't exceed screen width
+        length = attr->numCols;
+
+    if (length && (time(NULL) - attr->statusMsgTime < 5)) // checks if there is a message and
+        AppendString(abuff, attr->statusMsg, length);     // if it happened less than 5 seconds ago
 }
 
 /**************************************************************************************************
@@ -666,7 +710,8 @@ void RefreshScreen(TerminalAttr *attr)
     AppendString(&abuff, "\x1b[H", 3);    // command to reposition cursor to top-left of screen
 
     WriteRows(attr, &abuff);      // appends rows from file into the append buffer that are supposed to be visible
-    WriteStatusBar(attr, &abuff); // adds status bar to the very bottom of the display
+    WriteStatusBar(attr, &abuff); // adds status bar to the bottom of the display
+    WriteStatusMessage(attr, &abuff); // adds a status message below the status bar (i.e., bottommost line)
 
     // moves cursor to specified cursorY and cursorX position (+1 to convert 0-indexed to 1-indexed)
     snprintf(buff, sizeof(buff), "\x1b[%d;%dH", attr->cursorY + 1, attr->cursorX + 1);
@@ -763,7 +808,7 @@ int FetchWindowSize(int *numRows, int *numCols)
         return -1;                                                           // reports failure to get sizes
     else
     {
-        *numRows = size.ws_row - 1; // subtract 1 to account for status bar
+        *numRows = size.ws_row - 2; // subtract 2 to account for status bar and status message
         *numCols = size.ws_col;
         return 0; // reports success in getting sizes
     }
@@ -788,6 +833,8 @@ void InitTerminalAttr(TerminalAttr *attr)
     attr->maxColOffset = 0;
     attr->tRowsTot = 0;
     attr->tRow = NULL;
+    attr->statusMsg[0] = '\0';
+    attr->statusMsgTime = 0;
     attr->fileName = "[fileName]"; // in case no file is opened, set default name to no name
 
     // stores original state attributes; STDIN_FILENO means standard input stream
@@ -811,13 +858,15 @@ int main(int argc, char *argv[])
         OpenFile(&attr, argv[1]);
     }
 
+    SetStatusMessage(&attr, "HELP: Press CTRL-Q to quit"); // first status message when booting up program
+
     while (ProcessKeypress(&attr)) // ProcessKeypress returns either 0 or 1
     {
         // providing pointers of row member and column member to function FetchWindowSize
         if (FetchWindowSize(&(attr.numRows), &(attr.numCols)) == -1)
             ErrorHandler("fetch_window_size"); // gives error description
 
-        RefreshScreen(&attr);
+        RefreshScreen(&attr); // screen is only refreshed after every keypress
     }
 
     RawModeOff(attr.originalState);
