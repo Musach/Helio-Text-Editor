@@ -775,7 +775,6 @@ void InsertCharWrapper(TerminalAttr *attr, char charIn)
     int index = attr->cursorX + attr->colOffset; // gives string index of current row
     InsertChar(&attr->tRow[attr->cursorY + attr->rowOffset], index, charIn);
 
-    RefreshScreen(attr);
     MoveCursor(attr, RIGHT_ARROW); // increments cursor by 1 or accounts for col offset
 }
 
@@ -787,21 +786,22 @@ void InsertCharWrapper(TerminalAttr *attr, char charIn)
  ****************************************************************************************************/
 void InsertChar(TerminalRow *tRow, int x, char charIn)
 {
-    if (x < 0 || x > tRow->rendSize) // makes sure column index (x) is within valid range
+    if (x < 0 || x > tRow->size) // makes sure column index (x) is within valid range
     {
-        x = tRow->rendSize; // cursor can exceed current size by one (to type a char at end of line)
+        x = tRow->size; // cursor can exceed current size by one (to type a char at end of line)
     }
 
-    if ((tRow->rendStr = realloc(tRow->rendStr, tRow->rendSize + 2)) == NULL) // add 2 to make room for null byte + new char
+    if ((tRow->text = realloc(tRow->text, tRow->size + 2)) == NULL) // add 2 to make room for null byte + new char
     {
         ErrorHandler("InsertChar: realloc memory for tRow->text");
     }
 
     // moves char currently at x one to the right to make room for the new char
-    memmove(&tRow->rendStr[x + 1], &tRow->rendStr[x], tRow->rendSize - x + 1);
+    memmove(&tRow->text[x + 1], &tRow->text[x], tRow->size - x + 1);
 
-    tRow->rendSize++;          // increase row size by 1
-    tRow->rendStr[x] = charIn; // inserts newly typed char in specified location
+    tRow->size++;           // increase row size by 1
+    tRow->text[x] = charIn; // inserts newly typed char in specified location
+    RenderRow(tRow);        // to make sure string is updated onto screen
 }
 
 //------------------------------------------//
@@ -984,8 +984,8 @@ int main(int argc, char *argv[])
     {
         OpenFile(&attr, argv[1]);
     }
-
-    SetStatusMessage(&attr, "HELP: Press CTRL-Q to quit"); // first status message when booting up program
+    // first status message when booting up program
+    SetStatusMessage(&attr, "HELP: Press CTRL-Q to quit | Press CTRL-S to save");
 
     while (ProcessKeypress(&attr)) // ProcessKeypress returns either 0 or 1
     {
