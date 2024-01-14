@@ -6,9 +6,8 @@
  *    http://vt100.net/docs/vt100-ug/chapter3.html
  *
  * Sources:
- *  - This project draws inspiration and references from an online tutorial while maintaining
- *    distinct implementation: [Tutorial Link](https://viewsourcecode.org/snaptoken/kilo/04.
- *    aTextViewer.html)
+ *  - This project draws inspiration and references from an online tutorial:
+ *    [Tutorial Link](https://viewsourcecode.org/snaptoken/kilo/04.aTextViewer.html)
  ****************************************************************************************************/
 
 //====================Includes====================//
@@ -18,6 +17,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -112,11 +112,13 @@ void RawModeOn(struct termios rawState);
 int ReadKeypress();
 void RefreshScreen(TerminalAttr *attr);
 void RenderRow(TerminalRow *tRow);
+void SaveFile(TerminalAttr *attr);
 void Scroll(TerminalAttr *attr, int key);
 void SetStatusMessage(TerminalAttr *attr, const char *frmt, ...);
 void WriteRows(TerminalAttr *attr, AppendBuffer *abuff);
 void WriteStatusBar(TerminalAttr *attr, AppendBuffer *abuff);
 void WriteStatusMessage(TerminalAttr *attr, AppendBuffer *abuff);
+int WriteRowsToBuff(TerminalAttr *attr, char *buff);
 
 //=============================================================//
 //====================Function Declarations====================//
@@ -255,6 +257,10 @@ int ProcessKeypress(TerminalAttr *attr)
     {
     case CTRL_KEY('q'):
         return 0; // returns 0 to end a while loop in main
+        break;
+
+    case CTRL_KEY('s'):
+        SaveFile(attr);
         break;
 
     case UP_ARROW:
@@ -465,8 +471,9 @@ void OpenFile(TerminalAttr *attr, char *fileName)
 
     FILE *fp = fopen(fileName, "r");
     if (!fp)
+    {
         ErrorHandler("fopen");
-
+    }
     char *lineTxt = NULL;
     size_t capacity = 0;
     ssize_t lineSize;
@@ -474,8 +481,7 @@ void OpenFile(TerminalAttr *attr, char *fileName)
     while ((lineSize = getline(&lineTxt, &capacity, fp)) != -1)
     { // skips through all newline and return char in the row
 
-        while ((lineSize > 0) &&
-               ((lineTxt[lineSize - 1] == '\n') || (lineTxt[lineSize - 1] == '\r')))
+        while ((lineSize > 0) && ((lineTxt[lineSize - 1] == '\n') || (lineTxt[lineSize - 1] == '\r')))
         {
             lineSize--; // the size is updated and excludes '\n' & '\r' chars
         }
@@ -593,7 +599,7 @@ void FreeAbuff(AppendBuffer *abuff)
 /****************************************************************************************************
  * This function takes in the append buffer as a parameter. If no file is loaded, it prints a
  * welcome message. If a file was opened, WriteRows prints as many rows that fit onto the screen.
- * It does this by appending rows of the file (using the rendStr array) into the append buffer.
+ *
  * If vertical scrolling has occured, we start copying rows from the rendStr array with an index
  * offset by the amount of vertical scrolling that occured. If horizontal scrolling has occured,
  * we copy the text from from each row with the index of the string offset by the amount of
@@ -724,11 +730,9 @@ void WriteStatusMessage(TerminalAttr *attr, AppendBuffer *abuff)
 }
 
 /****************************************************************************************************
- * First the append buffer is declared. The first commands appended into the append buffer hide
- * and reposition the cursor to the top left of the screen. After that, WriteRows is called to
- * append all the rows into the append buffer. Lastly, it appends commands that reposition the
- * cursor back to its original location as well as show the cursor. Then all the buffer is written
- * at once to avoid flickering (including the commmands).
+ * The screen is refreshed after every key press in main through this function. It is also refreshed
+ * when a new character is typed in InsertChar. This function calls WriteRows and then prints the
+ * append buffer with one snprintf call to avoid flickering.
  ****************************************************************************************************/
 void RefreshScreen(TerminalAttr *attr)
 {
@@ -771,7 +775,7 @@ void InsertCharWrapper(TerminalAttr *attr, char charIn)
     int index = attr->cursorX + attr->colOffset; // gives string index of current row
     InsertChar(&attr->tRow[attr->cursorY + attr->rowOffset], index, charIn);
 
-    RefreshScreen(attr);           // update screen
+    RefreshScreen(attr);
     MoveCursor(attr, RIGHT_ARROW); // increments cursor by 1 or accounts for col offset
 }
 
@@ -798,6 +802,62 @@ void InsertChar(TerminalRow *tRow, int x, char charIn)
 
     tRow->rendSize++;          // increase row size by 1
     tRow->rendStr[x] = charIn; // inserts newly typed char in specified location
+}
+
+//------------------------------------------//
+//---------------Saving Files---------------//
+//------------------------------------------//
+
+/****************************************************************************************************
+ * Writes all tRows into a single buffer string and returns it. Adds '\n' to end of each row. Saves
+ * the length of the buffer in an int* which must be provided as a parameter. Caller of function must
+ * handle freeing the buffer memory.
+ ****************************************************************************************************/
+int WriteRowsToBuff(TerminalAttr *attr, char *buff)
+{
+    int lengthTot = 0;
+
+    for (int i = 0; i < attr->tRowsTot; i++)
+    {
+        lengthTot += attr->tRow[i].size + 1; // +1 for \n that is added later
+    }
+    // lengthBuff = lengthTot;
+
+    buff = malloc(lengthTot);
+
+    if (buff == NULL) // in case of failure of trying to allocate memory
+    {
+        ErrorHandler("WriteRowsToBuff: Couldn't allocate memory to buff");
+    }
+
+    int index = 0;
+    for (int i = 0; i < attr->tRowsTot; i++)
+    {
+        memcpy(&buff[index], attr->tRow[i].text, attr->tRow[i].size); // appends new string to end of old buffer
+
+        index += attr->tRow[i].size; // set index to right after the last char written
+        buff[index] = '\n';
+        index++; // again set to after last char written
+    }
+    return lengthTot;
+}
+
+void SaveFile(TerminalAttr *attr)
+{
+    if (attr->fileName == NULL)
+    {
+        return;
+    }
+
+    char *buff = NULL;
+    int length = WriteRowsToBuff(attr, buff);
+
+    // creates a new file if it doesn't exist and opens it for reading and writing
+    int fd = open(attr->fileName, O_RDWR | O_CREAT, 0644); // 0644 is standard text file perms
+    ftruncate(fd, length);                                 // sets file to specified length
+    write(fd, buff, length);
+    close(fd);
+    free(buff);
 }
 
 //-----------------------------------------------//
