@@ -1,4 +1,4 @@
-/**************************************************************************************************
+/****************************************************************************************************
  * File: helio.c
  * Description:
  *  - A text editor program developed in C99, designed to interface with the Linux terminal. It
@@ -9,7 +9,7 @@
  *  - This project draws inspiration and references from an online tutorial while maintaining
  *    distinct implementation: [Tutorial Link](https://viewsourcecode.org/snaptoken/kilo/04.
  *    aTextViewer.html)
- *************************************************************************************************/
+ ****************************************************************************************************/
 
 //====================Includes====================//
 #define _DEFAULT_SOURCE
@@ -41,6 +41,7 @@
 
 enum key
 {
+    BACKSPACE = 127,
     UP_ARROW = 500,
     DOWN_ARROW,
     RIGHT_ARROW,
@@ -58,33 +59,33 @@ typedef struct
     char *text;
 
     int rendSize;
-    char *rendStr; // render string
-} TerminalRow;     // contains information for a row of text
+    char *rendStr;
+} TerminalRow; // contains information for a row of text
 
 typedef struct
 {
-    // termios is a data structure that defines the attributes of the terminal
+    // defines the attributes of the terminal
     struct termios originalState;
 
-    TerminalRow *tRow; // row of text array
-    int tRowsTot;      // number of rows with text
+    TerminalRow *tRow;
+    int tRowsTot; // number of rows with text
 
-    int cursorX; // cursor x postion
-    int cursorY; // cursor y position
+    int cursorX; // x postion of cursor
+    int cursorY; // y position of cursor
 
     int numRows; // number of rows on screen
     int numCols; // number of columns on screen
 
-    int rowOff; // keeps track of rows scrolled (offset)
-    int colOff; // keeps track of columns scrolled (offset)
+    int rowOffset; // rows scrolled
+    int colOffset; // columns scrolled
 
-    int maxrowOff; // keeps track of max permissable vertical scrolling
-    int maxcolOff; // keeps track of max permissable horizontal scrolling
+    int maxrowOffset; // max permissable vertical scrolling
+    int maxcolOffset; // max permissable horizontal scrolling
 
     char statusMsg[80];
     time_t statusMsgTime; // from <time.h>
 
-    char *fileName; // stores the name of the file opened
+    char *fileName;
 
 } TerminalAttr; // used for storing terminal/window related variables
 
@@ -125,14 +126,10 @@ void WriteStatusMessage(TerminalAttr *attr, AppendBuffer *abuff);
 //---------------Reading Keypresses---------------//
 //------------------------------------------------//
 
-/**************************************************************************************************
-    Description:
-    Monitors and captures key presses until a key event is registered. Translates registered
-    keypresses into appropriate enum constants.
-
-    Dependencies:
-    ErrorHandler
-**************************************************************************************************/
+/****************************************************************************************************
+ * Monitors and captures key presses until a key event is registered. Translates registered
+ * keypresses into appropriate enum constants.
+ *****************************************************************************************************/
 int ReadKeypress()
 {
     int readStatus = 0;
@@ -143,7 +140,9 @@ int ReadKeypress()
         readStatus = read(STDIN_FILENO, &c, 1);
         // reads a character input; ignore EAGAIN as an error (for cygwin)
         if ((readStatus == -1) && (errno != EAGAIN))
-            ErrorHandler("read"); // gives error description
+        {
+            ErrorHandler("read");
+        }
     }
 
     if (c == '\x1b')
@@ -152,27 +151,29 @@ int ReadKeypress()
         int retSeq;
 
         if (read(STDIN_FILENO, &escSeq[0], 2) != 2) // checks if two chars were read
-            retSeq = '\x1b';                        // if it timed out, retSeq = esc char
-
+        {
+            retSeq = '\x1b'; // if it timed out, retSeq = esc char
+        }
         else if (escSeq[0] == '[') // checks for an esc sequence starting with '['
         {
             if ((escSeq[1] >= '0') && (escSeq[1] <= '9')) // for three char esc seq
             {
                 if (read(STDIN_FILENO, &escSeq[2], 1) != 1) // check for a third char
+                {
                     retSeq = '\x1b';
-
+                }
                 else if (escSeq[2] == '~')
                 {
                     switch (escSeq[1])
                     {
                     case '1':
-                        retSeq = HOME_KEY; // many diff esc seq for Home key across diff OS's
+                        retSeq = HOME_KEY;
                         break;
                     case '3':
                         retSeq = DEL_KEY;
                         break;
                     case '4':
-                        retSeq = END_KEY; // many diff esc seq for End key across diff OS's
+                        retSeq = END_KEY;
                         break;
                     case '5':
                         retSeq = PAGE_UP;
@@ -208,10 +209,10 @@ int ReadKeypress()
                     retSeq = LEFT_ARROW;
                     break;
                 case 'F':
-                    retSeq = END_KEY; // many diff esc seq for End key across diff OS's
+                    retSeq = END_KEY;
                     break;
                 case 'H':
-                    retSeq = HOME_KEY; // many diff esc seq for Home key across diff OS's
+                    retSeq = HOME_KEY;
                     break;
                 default:
                     retSeq = '\x1b'; // sequence is not valid, assume esc char
@@ -241,18 +242,11 @@ int ReadKeypress()
     return c;
 }
 
-/**************************************************************************************************
-    Description:
-    Utilizes ReadKeyPress() to handle registered keypresses. Returns 0 if 'Ctrl + Q' is pressed,
-    typically indicating a program termination. Directs other keypresses to specific functions for
-    further processing (e.g., arrow keys to MoveCursor() function).
-
-    PAGE_UP and PAGE_DOWN go up or down a page respectively by calling MoveCursor iteratively. HOME
-    sends cursorX to the beginning of a line while END sends it to the end of the current line.
-
-    Dependencies:
-    ReadKeyPress
-**************************************************************************************************/
+/****************************************************************************************************
+ * Utilizes ReadKeyPress() to handle registered keypresses. Returns 0 if 'Ctrl + Q' is pressed,
+ * typically indicating a program termination. Directs other keypresses to specific functions for
+ * further processing (e.g., arrow keys to MoveCursor() function).
+ ****************************************************************************************************/
 int ProcessKeypress(TerminalAttr *attr)
 {
     int key = ReadKeypress();
@@ -270,18 +264,36 @@ int ProcessKeypress(TerminalAttr *attr)
         MoveCursor(attr, key);
         break;
 
-    case PAGE_UP:                                   // moves a whole page up
-    case PAGE_DOWN:                                 // moves a whole page down
-                                                    // goes to begnning of or end of next page by calling MoveCursor iteratively
+    case PAGE_UP:   // moves a whole page up
+    case PAGE_DOWN: // moves a whole page down
+        // goes to begnning of or end of next page by calling MoveCursor iteratively
         for (int i = 0; i < attr->numRows - 1; i++) // iterates one whole page length
+        {
             // delegates scrolling to MoveCursor by simulating an up or down arrow key
-            MoveCursor(attr, key == PAGE_UP ? UP_ARROW : DOWN_ARROW); // if page up -> UP_ARROW else - > DOWN_ARROW
+            MoveCursor(attr, key == PAGE_UP ? UP_ARROW : DOWN_ARROW);
+        }
         break;
-    case HOME_KEY: // moves cursorX to beggining of the sline
+    case HOME_KEY: // moves cursorX to beggining of the line
         attr->cursorX = 0;
         break;
     case END_KEY: // moves cursorX to end of the line
-        attr->cursorX = attr->tRow[attr->cursorY + attr->rowOff].rendSize;
+        attr->cursorX = attr->tRow[attr->cursorY + attr->rowOffset].rendSize;
+        break;
+
+    // do nothing when ESC or CTRL-L is pressed
+    case '\x1b':
+    case CTRL_KEY('l'):
+        break;
+
+    // special characters
+    case '\r':
+        // will do later
+        break;
+
+    case BACKSPACE:
+    case DEL_KEY:
+    case CTRL_KEY('h'):
+        // will do later
         break;
 
     default:
@@ -296,121 +308,143 @@ int ProcessKeypress(TerminalAttr *attr)
 //---------------Moving the Cursor and Scrolling---------------//
 //-------------------------------------------------------------//
 
-/**************************************************************************************************
-    Description:
-    Two int variables, cursorX and cursorY, track cursor position within the TerminalAttr struct.
-    Both initialize to 0. A switch-case detects key presses, updating cursorX or cursorY based on
-    arrow or HOME key input. If cursor exceeds screen boundary, scrolling occurs.
-
-    Horizontal movement beyond a line jumps to the next via MoveCursor with a DOWN_ARROW input,
-    adjusting row lengths/offsets and resetting cursorX and colOff if scrolling occurs.
-    Similarly, moving before a line calls MoveCursor with UP_ARROW, placing the cursor at the end
-    of the line in the row above as well as handling any necessary scrolling.
-
-    Dependencies:
-    Scroll
-**************************************************************************************************/
+/****************************************************************************************************
+ * Two int variables, cursorX and cursorY, track cursor position within the TerminalAttr struct.
+ * Both initialize to 0. A switch-case detects key presses, updating cursorX or cursorY based on
+ * arrow or HOME key input. If cursor exceeds screen boundary, scrolling occurs.
+ *
+ * Passing the end of a line makes the cursor jump to the beginning of the line below. Passing the
+ * beginning of the line makes the cursor jump to the end of the line above.
+ ****************************************************************************************************/
 void MoveCursor(TerminalAttr *attr, int key)
 {
     int txtLen;
 
-    if (attr->cursorY < attr->tRowsTot)                             // checks if current row has text
-        txtLen = attr->tRow[attr->cursorY + attr->rowOff].rendSize; // calc size of curr row
-    else                                                            // used for rows with no text (tilde rows) and is also a default size value for a file with no text
+    if (attr->cursorY < attr->tRowsTot) // checks if current row has text
+    {
+        txtLen = attr->tRow[attr->cursorY + attr->rowOffset].rendSize;
+    }
+    else // used for rows with no text (tilde rows) and is also a default size value for a file with no text
+    {
         txtLen = 0;
+    }
 
     switch (key)
     {
     case UP_ARROW:
-        if (attr->cursorY == 0)     // if cursor is at topmost of screen
-            Scroll(attr, UP_ARROW); // scroll up
+        if (attr->cursorY == 0) // if cursor is at topmost of screen
+        {
+            Scroll(attr, UP_ARROW);
+        }
         else
+        {
             attr->cursorY--;
+        }
         break;
 
     case DOWN_ARROW:
-        if (attr->cursorY == attr->numRows - 1) // if cursor is at bottommost of screen
-            Scroll(attr, DOWN_ARROW);           // scroll down
+        if (attr->cursorY == attr->numRows - 1) // if cursor is at bottom end of screen
+        {
+            Scroll(attr, DOWN_ARROW);
+        }
         else
+        {
             attr->cursorY++;
+        }
         break;
 
     case RIGHT_ARROW:
         if ((attr->cursorX < attr->numCols - 1) && (attr->cursorX < txtLen)) // if cursorX is less than screen or end of line
-            attr->cursorX++;                                                 // move cursor right
-        else if (attr->colOff < attr->maxcolOff)
-            Scroll(attr, RIGHT_ARROW); // scrolls right if less than maxcolOff
-        else                           // means cursorX is on right side of last char
+        {
+            attr->cursorX++;
+        }
+        else if (attr->colOffset < attr->maxcolOffset)
+        {
+            Scroll(attr, RIGHT_ARROW); // scrolls right if less than maxcolOffset
+        }
+        // when the cursor reaches the end of the line, jump to the beginning of the line below
+        else // means cursorX is on right side of last char
         {
             MoveCursor(attr, DOWN_ARROW); // recursive call to move cursorY down one line and update scroll/offset values
-            attr->cursorX = 0;            // set cursorX to end of screen
-            attr->colOff = 0;             // set offset to max to ensure it reaches end of line
+            attr->cursorX = 0;            // set cursorX to left end of screen
+            attr->colOffset = 0;          // set offset to max to ensure it reaches end of line
         }
         break;
 
     case LEFT_ARROW:
-        if ((attr->cursorX == 0) && (attr->colOff > 0)) // if cursorX is at left end of screen & if screen has scrolled right
+        if ((attr->cursorX == 0) && (attr->colOffset > 0)) // cursorX is at left end of screen & if screen has scrolled right
+        {
             Scroll(attr, LEFT_ARROW);
+        }
+        // when the cursor passes the beginning of the line, jump to the end of the line above
         else if (attr->cursorX == 0)
         {
-            MoveCursor(attr, UP_ARROW);        // recursive call to move cursorY up one line and update scroll/offset values
-            attr->cursorX = attr->numCols - 1; // set cursorX to end of screen
-            attr->colOff = attr->maxcolOff;    // set offset to max to ensure it reaches end of line
+            MoveCursor(attr, UP_ARROW);           // recursive call to move cursorY up one line and update scroll/offset values
+            attr->cursorX = attr->numCols - 1;    // set cursorX to right end of screen
+            attr->colOffset = attr->maxcolOffset; // set offset to max to ensure it reaches end of line
         }
         else
             attr->cursorX--;
         break;
     }
 
-    if (attr->cursorY < attr->tRowsTot)                             // checks if current row has text
-        txtLen = attr->tRow[attr->cursorY + attr->rowOff].rendSize; // calc size of curr row
+    if (attr->cursorY < attr->tRowsTot) // checks if current row has text
+    {
+        txtLen = attr->tRow[attr->cursorY + attr->rowOffset].rendSize;
+    }
     // used for rows with no text (tilde rows) and is also a default size value for a file with no text
     else
-        txtLen = 0;
-
-    attr->maxcolOff = txtLen - attr->numCols + 1; // calculate max col offset
-    if (attr->maxcolOff < 0)                      // make sure its not a negative value
     {
-        attr->maxcolOff = 0;
-        if (attr->cursorX > txtLen)
-            attr->cursorX = txtLen; // since row is smaller than screen width, set cursorX to end of text line
+        txtLen = 0;
     }
-    if (attr->colOff > attr->maxcolOff) // make sure offset is not greater than max
-        attr->colOff = attr->maxcolOff;
+
+    attr->maxcolOffset = txtLen - attr->numCols + 1; // calculate max col offset
+    if (attr->maxcolOffset < 0)                      // make sure its not a negative value
+    {
+        attr->maxcolOffset = 0;
+        if (attr->cursorX > txtLen)
+        {
+            attr->cursorX = txtLen; // since row is smaller than screen width, set cursorX to end of text line
+        }
+    }
+    if (attr->colOffset > attr->maxcolOffset) // make sure offset is not greater than max
+    {
+        attr->colOffset = attr->maxcolOffset;
+    }
 }
 
-/**************************************************************************************************
-    Description:
-    The Scroll function manages horizontal scrolling when the cursor exceeds the current row's
-    screen length and vertical scrolling when the number of rows exceeds the screen length.
-    MoveCursor calls Scroll to handle scrolling behavior.
-
-    When scrolling horizontally, the screen scrolls until the last character is reached. Vertical
-    scrolling continues until the last row is reached, handling scrolling in both directions until
-    the first character or row is reached.
-
-    Dependencies:
-    None
-**************************************************************************************************/
+/****************************************************************************************************
+ * The Scroll function manages horizontal scrolling when the cursor exceeds the current row's
+ * screen length and vertical scrolling when the number of rows exceeds the screen length.
+ * MoveCursor calls Scroll to handle scrolling behavior.
+ *
+ * When scrolling horizontally, the screen scrolls until the last character is reached. Vertical
+ * scrolling continues until the last row is reached, handling scrolling in both directions until
+ * the first character or row is reached.
+ ****************************************************************************************************/
 void Scroll(TerminalAttr *attr, int key)
 {
     switch (key)
     {
     case UP_ARROW:
-        if (attr->rowOff > 0) // makes sure rowOff doesn't go below min offset
-            attr->rowOff -= 1;
+        if (attr->rowOffset > 0)
+        {
+            attr->rowOffset -= 1;
+        }
         break;
     case DOWN_ARROW:
-        if (attr->rowOff < attr->maxrowOff) // makes sure rowOff doesn't exceed the max offset
-            attr->rowOff += 1;
+        if (attr->rowOffset < attr->maxrowOffset)
+        {
+            attr->rowOffset += 1;
+        }
         break;
+    // the check for whether the end of the line is reached happens in MoveCursor
     case RIGHT_ARROW:
-        // if (attr->colOff < attr->maxcolOff) // makes sure colOff doesn't exceed the max offset (redundant)
-        attr->colOff += 1;
+        attr->colOffset += 1;
         break;
+    // the check for whether the left end of the screen is reached happens in MoveCursor
     case LEFT_ARROW:
-        // if (attr->colOff > 0) // makes sure colOff doesn't go below min offset (redundant)
-        attr->colOff -= 1;
+        attr->colOffset -= 1;
         break;
     }
 }
@@ -419,23 +453,19 @@ void Scroll(TerminalAttr *attr, int key)
 //---------------Processing Text from Files---------------//
 //--------------------------------------------------------//
 
-/**************************************************************************************************
-    Description:
-    OpenFile takes the file name pointer as a parameter. It opens the file and copies each line
-    without including '/r' and '/n' characters. The size is also updated accordingly. The string of
-    each row or line is then put into AppendRow which handles storing the text for each row.
-
-    Dependencies:
-    ErrorHandler, AppendRow
-**************************************************************************************************/
+/****************************************************************************************************
+ * OpenFile takes the file name pointer as a parameter. It opens the file and copies each line
+ * without including '/r' and '/n' characters. The size is also updated accordingly. The string of
+ * each row or line is then put into AppendRow which handles storing the text for each row.
+ ****************************************************************************************************/
 void OpenFile(TerminalAttr *attr, char *fileName)
 {
-    // free(attr->fileName);              // frees any memory so we can use strdup
-    attr->fileName = strdup(fileName); // copies fileName into attr struct's fileName string
+    // free(attr->fileName);
+    attr->fileName = strdup(fileName);
 
     FILE *fp = fopen(fileName, "r");
     if (!fp)
-        ErrorHandler("fopen"); // manages errors
+        ErrorHandler("fopen");
 
     char *lineTxt = NULL;
     size_t capacity = 0;
@@ -446,37 +476,34 @@ void OpenFile(TerminalAttr *attr, char *fileName)
 
         while ((lineSize > 0) &&
                ((lineTxt[lineSize - 1] == '\n') || (lineTxt[lineSize - 1] == '\r')))
+        {
             lineSize--; // the size is updated and excludes '\n' & '\r' chars
-
+        }
         // the line is then copied without '\n' or '\r' chars
         AppendRow(attr, lineTxt, lineSize);
     }
-    attr->maxrowOff = attr->tRowsTot - attr->numRows; // define once the max rows that can be scrolled
+
+    attr->maxrowOffset = attr->tRowsTot - attr->numRows;
     free(lineTxt);
     fclose(fp);
 }
 
-/**************************************************************************************************
-    Description:
-    This function copies text from the string given to it into a string within tRow (TerminalRow
-    struct). tRow is an array where each index contains a string and the size of that string for a
-    single row of text from the file. Before copying a row into the corresponding tRow, the amount
-    of tRows is incremented by 1 for each new row copied. Tabs are accounted for in RenderRow.
-
-    Dependencies:
-    RenderRow
-**************************************************************************************************/
+/****************************************************************************************************
+ * This function copies text from the string given to it into a string within tRow (TerminalRow
+ * struct). tRow is an array where each index contains a string and the size of that string for a
+ * single row of text from the file. Tabs are accounted for in RenderRow.
+ ****************************************************************************************************/
 void AppendRow(TerminalAttr *attr, char *str, size_t rowSize)
 {
-    attr->tRowsTot++; // increment number of rows since a new row is needed
+    attr->tRowsTot++; // new row added
     attr->tRow = realloc(attr->tRow, sizeof(TerminalRow) * (attr->tRowsTot));
 
-    int i = attr->tRowsTot - 1; // last index is one less than size
+    int i = attr->tRowsTot - 1;
 
     attr->tRow[i].size = rowSize;
-    attr->tRow[i].text = malloc(rowSize + 1); //+1 for null char
+    attr->tRow[i].text = malloc(rowSize + 1); // +1 for null char
     memcpy(attr->tRow[i].text, str, rowSize); // copy string into allocated slot
-    attr->tRow[i].text[rowSize] = '\0';       // manually terminate string
+    attr->tRow[i].text[rowSize] = '\0';
 
     attr->tRow[i].rendSize = 0; // initialize render string and its size
     attr->tRow[i].rendStr = NULL;
@@ -484,24 +511,24 @@ void AppendRow(TerminalAttr *attr, char *str, size_t rowSize)
     RenderRow(&attr->tRow[i]); // send to RenderRow to account for tabs
 }
 
-/**************************************************************************************************
-    Description:
-    This function takes one tRow index as it's parameter. It first checks the string in tRow for
-    tab characters. It then allocates memory for a new string, rendStr. If it found tab characters
-    in text (tRow string), it allocates 7 additional spaces in memory for each tab characrer found.
-    It then adds spaces for each tab in rendStr until it reaches a tab stop.
-
-    Dependencies:
-    None
-**************************************************************************************************/
+/****************************************************************************************************
+ * This function takes one tRow index as it's parameter. It first checks the string in tRow for
+ * tab characters. It then allocates memory for a new string, rendStr. If it found tab characters
+ * in text (tRow string), it allocates 7 additional spaces in memory for each tab characrer found.
+ * It then adds spaces for each tab in rendStr until it reaches a tab stop.
+ ****************************************************************************************************/
 void RenderRow(TerminalRow *tRow)
 {
     int numTabs = 0;
     int i;
 
     for (i = 0; i < tRow->size; i++)
+    {
         if (tRow->text[i] == '\t')
+        {
             numTabs++;
+        }
+    }
 
     free(tRow->rendStr); // make sure no memory is reserved for rendStr
     // each tab is a maximum of 8 characters, 1 character has already been accounted for each tab
@@ -512,84 +539,80 @@ void RenderRow(TerminalRow *tRow)
     for (i = 0; i < tRow->size; i++)
     {
         if (tRow->text[i] != '\t')
+        {
             tRow->rendStr[j++] = tRow->text[i]; // copy character from text string
+        }
         else
         {
-            tRow->rendStr[j++] = ' ';     // each tab must increment by at least one space
-            while (j % TAB_STOP != 0)     // checks for a tab stop
+            tRow->rendStr[j++] = ' '; // each tab must increment by at least one space
+            while (j % TAB_STOP != 0) // checks for a tab stop
+            {
                 tRow->rendStr[j++] = ' '; // keep adding tabs until we reach a tab stop
+            }
         }
     }
 
-    tRow->rendStr[j] = '\0'; // manually terminate string
-    tRow->rendSize = j;      // set rendStr size to number of characters copied
+    tRow->rendStr[j] = '\0';
+    tRow->rendSize = j; // set to num of chars copied
 }
 
 //-------------------------------------------------------//
 //---------------Displaying Text on Screen---------------//
 //-------------------------------------------------------//
 
-/**************************************************************************************************
-    Description:
-    Taking a string, the string's length and an AppendBuffer as its parameters, this function
-    reallocates memory for a pointer that points to the buffer string within the abuff struct. The
-    buffer string's job is to store all the text for a file. So when a new line of text is sent to
-    AppendString, AppendString must make sure there is enough memory in the buffer string to append
-    the new string on top of the text that is already inside the buffer.
-
-    Dependencies:
-    None
-**************************************************************************************************/
+/****************************************************************************************************
+ * Taking a string, the string's length and an AppendBuffer as its parameters, this function
+ * reallocates memory for a pointer that points to the buffer string within the abuff struct. The
+ * buffer string's job is to store all the text for a file. So when a new line of text is sent to
+ * AppendString, AppendString must make sure there is enough memory in the buffer string to append
+ * the new string on top of the text that is already inside the buffer.
+ ****************************************************************************************************/
 void AppendString(AppendBuffer *abuff, const char *str, int length)
 {
     // creates new buffer pointer with appropiate memory size
     char *newBuff = realloc(abuff->buff, abuff->length + length); // length of new string is accounted for
 
     if (newBuff == NULL) // in case of failure of trying to allocate memory
+    {
         return;
+    }
 
     memcpy(&newBuff[abuff->length], str, length); // appends new string to end of old buffer
     abuff->buff = newBuff;                        // sets pointer to the new buffer pointer that has additional memory
     abuff->length += length;                      // adjusts the lenght of the buffer string
 }
 
-/**************************************************************************************************
-    Description:
-    Deallocates memory from the append buffer.
-
-    Dependencies:
-    None
-**************************************************************************************************/
+/****************************************************************************************************
+ * Deallocates memory from the append buffer.
+ ****************************************************************************************************/
 void FreeAbuff(AppendBuffer *abuff)
 {
     free(abuff->buff);
 }
 
-/**************************************************************************************************
-    Description:
-    This function takes in the append buffer as a parameter. If no file is loaded, it prints a
-    welcome message. If a file was opened, WriteRows prints as many rows that fit onto the screen.
-    It does this by appending rows of the file (using the rendStr array) into the append buffer.
-    If vertical scrolling has occured, we start copying rows from the rendStr array with an index
-    offset by the amount of vertical scrolling that occured. If horizontal scrolling has occured,
-    we copy the text from from each row with the index of the string offset by the amount of
-    horizontal scrolling that occured. RefreshScreen handles printing to the terminal.
-
-    Dependencies:
-    AppendString
-**************************************************************************************************/
+/****************************************************************************************************
+ * This function takes in the append buffer as a parameter. If no file is loaded, it prints a
+ * welcome message. If a file was opened, WriteRows prints as many rows that fit onto the screen.
+ * It does this by appending rows of the file (using the rendStr array) into the append buffer.
+ * If vertical scrolling has occured, we start copying rows from the rendStr array with an index
+ * offset by the amount of vertical scrolling that occured. If horizontal scrolling has occured,
+ * we copy the text from from each row with the index of the string offset by the amount of
+ * horizontal scrolling that occured. RefreshScreen handles printing to the terminal.
+ ****************************************************************************************************/
 void WriteRows(TerminalAttr *attr, AppendBuffer *abuff)
 {
     int rows = attr->numRows;
     int columns = attr->numCols;
-    int scrollRows = attr->rowOff;
-    int scrollCols = attr->colOff;
+    int scrollRows = attr->rowOffset;
+    int scrollCols = attr->colOffset;
     int fileRows = attr->tRowsTot;
     char welcome[40];
 
     int length = snprintf(welcome, sizeof(welcome), "Helio Editor -- version %s", HELIO_VERSION);
     if (length > columns)
-        length = columns;                     // makes sure message fits screen
+    {
+        length = columns; // makes sure message fits screen
+    }
     int padding = (columns - length - 1) / 2; // minus 1 to account for the tilde
 
     for (int i = 0; i < rows; i++)
@@ -601,9 +624,14 @@ void WriteRows(TerminalAttr *attr, AppendBuffer *abuff)
             int txtLen = attr->tRow[i + scrollRows].rendSize - scrollCols; // accounts for scrolled rows
 
             if (txtLen > columns) // if txtLen is greater than window width
+            {
                 txtLen = columns; // makes txtLen same legnth of window width
-            if (txtLen > 0)       // doesn't let string be printed if no there is no text
+            }
+
+            if (txtLen > 0) // doesn't let string be printed if no there is no text
+            {
                 AppendString(abuff, &attr->tRow[i + scrollRows].rendStr[scrollCols], txtLen);
+            }
         }
         else // inserts padding and welcome message
         {
@@ -612,7 +640,9 @@ void WriteRows(TerminalAttr *attr, AppendBuffer *abuff)
             if ((i == rows / 4) && (fileRows == 0)) // only prints wlc msg if no file loaded
             {
                 for (int j = 0; j < padding; j++) // centers message by adding spaces
+                {
                     AppendString(abuff, " ", 1);
+                }
                 AppendString(abuff, welcome, length);
             }
         }
@@ -622,50 +652,47 @@ void WriteRows(TerminalAttr *attr, AppendBuffer *abuff)
     }
 }
 
-/**************************************************************************************************
-    Description:
-    Prints the statusBar (last bar on screen) to display information about the file (file name and
-    row number). If no file is opened and therefore no file name is given, the default is set to
-    "[No Name]" in InitTerminalAttr. Up to 20 characters of the file name will be shown.
-
-    For the m command, refer to selecting graphic rendition in the VT100 user guide.
-
-    Dependencies:
-    AppendString
-**************************************************************************************************/
+/****************************************************************************************************
+ * Prints the statusBar (last bar on screen) to display information about the file (file name and
+ * row number). If no file is opened and therefore no file name is given, the default is set to
+ * "[No Name]" in InitTerminalAttr. Up to 20 characters of the file name will be shown.
+ *
+ * For the m command, refer to selecting graphic rendition in the VT100 user guide.
+ ****************************************************************************************************/
 void WriteStatusBar(TerminalAttr *attr, AppendBuffer *abuff)
 {
     AppendString(abuff, "\x1b[7m", 4);   // command to display inverted colors (switches black with white)
     char statusBar1[80], statusBar2[80]; // left side and right side string of the status bar respectively
+
     // sets length as well as prints the file name and the number of rows in the file
     int length1 = snprintf(statusBar1, sizeof(statusBar1), "%.20s - %d Lines", attr->fileName, attr->tRowsTot);
-    // sets length as well as prints the current row the cursor is on as well as the number of rows in the file
-    int length2 = snprintf(statusBar2, sizeof(statusBar2), "%d/%d", attr->cursorY + attr->rowOff + 1, attr->tRowsTot);
+    // sets length and prints the current row the cursor is on as well as the number of rows in the file
+    int length2 = snprintf(statusBar2, sizeof(statusBar2), "%d/%d", attr->cursorY + attr->rowOffset + 1, attr->tRowsTot);
 
     if (length1 > attr->numCols)
+    {
         length1 = attr->numCols; // makes sure length of statusBar doesn't exceed screen width
+    }
+
     AppendString(abuff, statusBar1, length1);
 
     // makes sure it prints spaces until there is exactly enough space left for statusBar2
     for (int i = length1 + length2; i < attr->numCols; i++)
+    {
         AppendString(abuff, " ", 1); // adds spaces
-
+    }
     AppendString(abuff, statusBar2, length2); // prints right side of statusBar (statusBar2)
 
     AppendString(abuff, "\x1b[m", 3); // sets display colors back to default
     AppendString(abuff, "\r\n", 2);   // makes room for status message to be displayed
 }
 
-/**************************************************************************************************
-    Description:
-    This function takes in a variable amount of arguments (like printf), so it is a variadic
-    function. To use such functions, we must use a va_list type. We then input the last argument
-    before "..." into va_start so the next arguments' addresses are known. Then we call vsnprintf to
-    take care of reading and formatting the string. Lastly we call va_end.
-
-    Dependencies:
-    None
-**************************************************************************************************/
+/****************************************************************************************************
+ * Takes in a variable amount of arguments (like printf), so it is a variadic
+ * function. To use such functions, we must use a va_list type. We then input the last argument
+ * before "..." into va_start so the next arguments' addresses are known. Then we call vsnprintf to
+ * take care of reading and formatting the string. Lastly we call va_end.
+ ****************************************************************************************************/
 void SetStatusMessage(TerminalAttr *attr, const char *frmt, ...)
 {
     va_list arguments;
@@ -676,37 +703,33 @@ void SetStatusMessage(TerminalAttr *attr, const char *frmt, ...)
     attr->statusMsgTime = time(NULL);
 }
 
-/**************************************************************************************************
-    Description:
-    Writes the status message that was set in SetStatusMessage to the append buffer, abuff. It also
-    makes sure that it only display status messages that are less than 5 seconds after a keypress.
-
-    Dependencies:
-    AppendString
-**************************************************************************************************/
+/****************************************************************************************************
+ * Writes the status message that was set in SetStatusMessage to the append buffer, abuff. It also
+ * makes sure that it only display status messages that are less than 5 seconds after a keypress.
+ ****************************************************************************************************/
 void WriteStatusMessage(TerminalAttr *attr, AppendBuffer *abuff)
 {
     AppendString(abuff, "\x1b[k", 3); // clears the current row
     int length = strlen(attr->statusMsg);
 
     if (length > attr->numCols) // makes sure string length doesn't exceed screen width
+    {
         length = attr->numCols;
+    }
 
     if (length && (time(NULL) - attr->statusMsgTime < 5)) // checks if there is a message and
-        AppendString(abuff, attr->statusMsg, length);     // if it happened less than 5 seconds ago
+    {
+        AppendString(abuff, attr->statusMsg, length); // if it happened less than 5 seconds ago
+    }
 }
 
-/**************************************************************************************************
-    Description:
-    First the append buffer is declared. The first commands appended into the append buffer hide
-    and reposition the cursor to the top left of the screen. After that, WriteRows is called to
-    append all the rows into the append buffer. Lastly, it appends commands that reposition the
-    cursor back to its original location as well as show the cursor. Then all the buffer is written
-    at once to avoid flickering (including the commmands).
-
-    Dependencies:
-    AppendString, WriteRows, FreeAbuff
-**************************************************************************************************/
+/****************************************************************************************************
+ * First the append buffer is declared. The first commands appended into the append buffer hide
+ * and reposition the cursor to the top left of the screen. After that, WriteRows is called to
+ * append all the rows into the append buffer. Lastly, it appends commands that reposition the
+ * cursor back to its original location as well as show the cursor. Then all the buffer is written
+ * at once to avoid flickering (including the commmands).
+ ****************************************************************************************************/
 void RefreshScreen(TerminalAttr *attr)
 {
     AppendBuffer abuff = ABUFF_INIT;
@@ -734,43 +757,42 @@ void RefreshScreen(TerminalAttr *attr)
 //---------------Text Editing Functions---------------//
 //----------------------------------------------------//
 
-/**************************************************************************************************
-    Description:
-    Gives tRow and index directly to InsertChar as paramaters (reduces wordiness in InsertChar).
-
-    Dependencies:
-    InsertChar, RefreshScreen, MoveCursor
-**************************************************************************************************/
+/****************************************************************************************************
+ * Gives tRow and index directly to InsertChar as paramaters (reduces wordiness in InsertChar).
+ ****************************************************************************************************/
 void InsertCharWrapper(TerminalAttr *attr, char charIn)
 {
-    if ((attr->cursorY + attr->rowOff) == attr->tRowsTot) // means cursorY is on the line after the last row of the file
-        AppendRow(attr, "", 0);                           // makes a new row so text can be written in it
+    if ((attr->cursorY + attr->rowOffset) == attr->tRowsTot) // means cursorY is on the line after the last row of the file
+    {
+        AppendRow(attr, "", 0); // makes a new row so text can be written in it
+    }
 
-    // pass tRow and cursorX + colOff directly to faciliate readability
-    int index = attr->cursorX + attr->colOff; // gives string index of current row
-    InsertChar(&attr->tRow[attr->cursorY + attr->rowOff], index, charIn);
+    // pass tRow and cursorX + colOffset directly to faciliate readability
+    int index = attr->cursorX + attr->colOffset; // gives string index of current row
+    InsertChar(&attr->tRow[attr->cursorY + attr->rowOffset], index, charIn);
 
     RefreshScreen(attr);           // update screen
     MoveCursor(attr, RIGHT_ARROW); // increments cursor by 1 or accounts for col offset
 }
 
-/**************************************************************************************************
-    Description:
-    tRow is given directly as a pointer to a individual row (not the whole array) and x is cursorX.
-    The size of the row's string is incremented by one and then we reallocate the appropiate amount
-    of memory for the new char. Next, we move the char at index x one to the right to make room for
-    the new char to be inserted. Lastly, the new char is inserted at index x.
-
-    Dependencies:
-    ErrorHandler
-**************************************************************************************************/
+/****************************************************************************************************
+ * tRow is given directly as a pointer to a individual row (not the whole array) and x is cursorX.
+ * The size of the row's string is incremented by one and then we reallocate the appropiate amount
+ * of memory for the new char. Next, we move the char at index x one to the right to make room for
+ * the new char to be inserted. Lastly, the new char is inserted at index x.
+ ****************************************************************************************************/
 void InsertChar(TerminalRow *tRow, int x, char charIn)
 {
     if (x < 0 || x > tRow->rendSize) // makes sure column index (x) is within valid range
-        x = tRow->rendSize;          // cursor can exceed current size by one (to type a char at end of line)
+    {
+        x = tRow->rendSize; // cursor can exceed current size by one (to type a char at end of line)
+    }
 
     if ((tRow->rendStr = realloc(tRow->rendStr, tRow->rendSize + 2)) == NULL) // add 2 to make room for null byte + new char
+    {
         ErrorHandler("InsertChar: realloc memory for tRow->text");
+    }
+
     // moves char currently at x one to the right to make room for the new char
     memmove(&tRow->rendStr[x + 1], &tRow->rendStr[x], tRow->rendSize - x + 1);
 
@@ -782,13 +804,9 @@ void InsertChar(TerminalRow *tRow, int x, char charIn)
 //---------------Utility Functions---------------//
 //-----------------------------------------------//
 
-/**************************************************************************************************
-    Description:
-    Displays an error description (given as a parameter) and forcefully exits program.
-
-    Dependencies:
-    None
-**************************************************************************************************/
+/****************************************************************************************************
+ * Displays an error description (given as a parameter) and forcefully exits program.
+ ****************************************************************************************************/
 void ErrorHandler(const char *str)
 {
     write(STDOUT_FILENO, "\x1b[2J", 4); // refreshes screen
@@ -798,15 +816,11 @@ void ErrorHandler(const char *str)
     exit(1);
 }
 
-/**************************************************************************************************
-    Description:
-    Turns on raw mode; a terminal mode in which input characters are read immediately and output
-    characters are sent directly to the screen. It does so by turning on and off certain flags.
-    The termios struct given as a prameter is not modified since we passed it by value.
-
-    Dependencies:
-    None
-**************************************************************************************************/
+/****************************************************************************************************
+ * Turns on raw mode; a terminal mode in which input characters are read immediately and output
+ * characters are sent directly to the screen. It does so by turning on and off certain flags.
+ * The termios struct given as a prameter is not modified since we passed it by value.
+ ****************************************************************************************************/
 void RawModeOn(struct termios rawState)
 {
     // turns off canonical flag, echo flag, ctrl c/z (ISIG) cmnds and ctrl v cmnd (IEXTEN)
@@ -831,61 +845,53 @@ void RawModeOn(struct termios rawState)
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &rawState);
 }
 
-/**************************************************************************************************
-    Description:
-    Turns onff rawMode by setting all the flags to the original state taht they were before being
-    modified. We are able to do this by saving a copy of the original termios struct as a pointer
-    (through the InitTerminalAttr function).
-
-    Dependencies:
-    ErrorHandler
-**************************************************************************************************/
+/****************************************************************************************************
+ * Turns onff rawMode by setting all the flags to the original state that they were before being
+ * modified. We are able to do this by saving a copy of the original termios struct as a pointer
+ * (through the InitTerminalAttr function).
+ ****************************************************************************************************/
 void RawModeOff(struct termios originalState)
 {
     // sets attributes back to the orignal terminal state
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalState) == -1)
+    {
         ErrorHandler("tcsetattr"); // gives error description
+    }
 }
 
-/**************************************************************************************************
-    Description:
-    Gets the window width and length (row and column sizes) by using the winsize struct. To access
-    this struct, we use the ioctl function (both winsize and iocatl are located in <sys/ioctl.h>).
-
-    Dependencies:
-    None
-**************************************************************************************************/
+/****************************************************************************************************
+ * Gets the window width and length (row and column sizes) by using the winsize struct. To access
+ * this struct, we use the ioctl function (both winsize and iocatl are located in <sys/ioctl.h>).
+ ****************************************************************************************************/
 int FetchWindowSize(int *numRows, int *numCols)
 {
     struct winsize size;
     // ioctl stands for input output control; it is able to fetch the window size on most systems
     if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == -1) || size.ws_col == 0) // checks for erroneous behaviour
-        return -1;                                                           // reports failure to get sizes
+    {
+        return -1; // reports failure to get sizes
+    }
     else
     {
-        *numRows = size.ws_row - 2; // subtract 2 to account for status bar and status message
+        *numRows = size.ws_row - 2; // -2 to account for status bar and status message
         *numCols = size.ws_col;
         return 0; // reports success in getting sizes
     }
 }
 
-/**************************************************************************************************
-    Description:
-    Initiliazes all variables that are a part of the attr (TerminalAttr) struct. attr is defined in
-    main and is passed by reference to this function. It also initializes the orignalState termios
-    struct and calls FetchWindowSize.
-
-    Dependencies:
-    ErrorHandler
-**************************************************************************************************/
+/****************************************************************************************************
+ * Initiliazes all variables that are a part of the attr (TerminalAttr) struct. attr is defined in
+ * main and is passed by reference to this function. It also initializes the orignalState termios
+ * struct and calls FetchWindowSize.
+ ****************************************************************************************************/
 void InitTerminalAttr(TerminalAttr *attr)
 {
     attr->cursorX = 0; // set x and y cursor positions to top left of screen
     attr->cursorY = 0;
-    attr->rowOff = 0;
-    attr->colOff = 0;
-    attr->maxrowOff = 0;
-    attr->maxcolOff = 0;
+    attr->rowOffset = 0;
+    attr->colOffset = 0;
+    attr->maxrowOffset = 0;
+    attr->maxcolOffset = 0;
     attr->tRowsTot = 0;
     attr->tRow = NULL;
     attr->statusMsg[0] = '\0';
@@ -894,14 +900,20 @@ void InitTerminalAttr(TerminalAttr *attr)
 
     // stores original state attributes; STDIN_FILENO means standard input stream
     if (tcgetattr(STDIN_FILENO, &(attr->originalState)) == -1)
-        ErrorHandler("tcgetattr"); // gives error description
+    {
+        ErrorHandler("tcgetattr");
+    }
     // provides pointers of row member and column member to function FetchWindowSize
     if (FetchWindowSize(&(attr->numRows), &(attr->numCols)) == -1)
+    {
         ErrorHandler("fetch_window_size"); // gives error description
+    }
 }
 
-//====================main Program====================//
-
+/****************************************************************************************************
+ * argc is the number of command line arguments while argv is an array of strings that holds the
+ * actual command-line arguments.
+ ****************************************************************************************************/
 int main(int argc, char *argv[])
 {
     TerminalAttr attr;
@@ -919,7 +931,9 @@ int main(int argc, char *argv[])
     {
         // providing pointers of row member and column member to function FetchWindowSize
         if (FetchWindowSize(&(attr.numRows), &(attr.numCols)) == -1)
-            ErrorHandler("fetch_window_size"); // gives error description
+        {
+            ErrorHandler("fetch_window_size");
+        }
 
         RefreshScreen(&attr); // screen is only refreshed after every keypress
     }
