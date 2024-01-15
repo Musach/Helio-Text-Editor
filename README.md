@@ -1,6 +1,6 @@
 # Helio-Text-Editor
 
-Helio Text Editor is a simple text editor designed for quick and simple use. It is designed with a minimalistic approach and is built in the C langauge using the C99 standard. It runs on Unix terminals with a specific focus on the Ubuntu terminal environment; I personally used WSL2 to run my program.
+Helio Text Editor is a simple text editor designed for quick and simple use. It is designed with a minimalistic approach and is built in the C langauge using the C99 standard. It runs on Unix terminals with a specific focus on the Ubuntu terminal environment; I personally used WSL2 to test and run my program.
 
 ## Features
 
@@ -17,21 +17,24 @@ the text editor interacts with the terminal using the `<termios.h>` header, whic
 
 ### Windows (WSL2 Installation)
 
-1. Install Windows Subsystem for Linux 2 (WSL2):
-   - Follow the [WSL2 installation guide](link-to-wsl2-installation).
-   - Set up a new Linux distribution of your choice within WSL2.
+1. **Install Windows Subsystem for Linux 2 (WSL2):**
+   - You can conveniently install all the prerequisites for WSL with a single command. Open PowerShell or Windows Command Prompt in administrator mode by right-clicking and selecting "Run as administrator." Enter the following command:
+      ```powershell
+      wsl --install
+      ```
+   - Alternatively, you can install other environments such as Cygwin, although detailed instructions for their installation are not explained here.
 
-2. Open the Linux environment:
-   - Run `wsl` in the command line to enter the Linux environment.
+2. **Open the Linux environment:**
+   - Run `Bash` in the command line to enter the Linux environment.
 
-3. Install necessary tools:
-   - Inside WSL2, run `sudo apt-get install gcc make` to install the GNU Compiler Collection and the make program.
+3. **Install necessary tools:**
+   - Inside the Linux terminal, run `sudo apt-get install gcc make` to install the GNU Compiler Collection and the make program.
 
 ### macOS
 
 - Run the `cc` command. A window should appear asking you to install command line developer tools. You can also run `xcode-select --install` to trigger this window.
 
-### Linux (Ubuntu)
+### Linux
 
 - In Ubuntu, run `sudo apt-get install gcc make`.
 - Other Linux distributions should have `gcc` and `make` packages available.
