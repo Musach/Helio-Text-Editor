@@ -118,7 +118,7 @@ void SetStatusMessage(TerminalAttr *attr, const char *frmt, ...);
 void WriteRows(TerminalAttr *attr, AppendBuffer *abuff);
 void WriteStatusBar(TerminalAttr *attr, AppendBuffer *abuff);
 void WriteStatusMessage(TerminalAttr *attr, AppendBuffer *abuff);
-int WriteRowsToBuff(TerminalAttr *attr, char *buff);
+char *WriteRowsToBuff(TerminalAttr *attr, int *length);
 
 //=============================================================//
 //====================Function Declarations====================//
@@ -813,7 +813,7 @@ void InsertChar(TerminalRow *tRow, int x, char charIn)
  * the length of the buffer in an int* which must be provided as a parameter. Caller of function must
  * handle freeing the buffer memory.
  ****************************************************************************************************/
-int WriteRowsToBuff(TerminalAttr *attr, char *buff)
+char *WriteRowsToBuff(TerminalAttr *attr, int *length)
 {
     int lengthTot = 0;
 
@@ -821,9 +821,9 @@ int WriteRowsToBuff(TerminalAttr *attr, char *buff)
     {
         lengthTot += attr->tRow[i].size + 1; // +1 for \n that is added later
     }
-    // lengthBuff = lengthTot;
+    *length = lengthTot;
 
-    buff = malloc(lengthTot);
+    char *buff = malloc(lengthTot);
 
     if (buff == NULL) // in case of failure of trying to allocate memory
     {
@@ -839,9 +839,13 @@ int WriteRowsToBuff(TerminalAttr *attr, char *buff)
         buff[index] = '\n';
         index++; // again set to after last char written
     }
-    return lengthTot;
+    return buff;
 }
 
+/****************************************************************************************************
+ * Creates file with the same file name as the opened file (if a file was opened) and saves it to
+ * storage (same directory as program). Calls WriteRowsToBuff and provides the buffer for it.
+ ****************************************************************************************************/
 void SaveFile(TerminalAttr *attr)
 {
     if (attr->fileName == NULL)
@@ -849,8 +853,8 @@ void SaveFile(TerminalAttr *attr)
         return;
     }
 
-    char *buff = NULL;
-    int length = WriteRowsToBuff(attr, buff);
+    int length;
+    char *buff = WriteRowsToBuff(attr, &length);
 
     // creates a new file if it doesn't exist and opens it for reading and writing
     int fd = open(attr->fileName, O_RDWR | O_CREAT, 0644); // 0644 is standard text file perms
