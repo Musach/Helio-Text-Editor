@@ -40,8 +40,18 @@ the text editor interacts with the terminal using the `<termios.h>` header, whic
 - Other Linux distributions should have `gcc` and `make` packages available.
 
 ## Running the Program
-You can download the helio compiled executable file and run it in your Unix environement by typing ./helio <fileName> (including a fileName means opening an existing file). You may need to press enter a second time for the program to run.
 
-Alternatively you can use the `make` command (must download the Makefile in the repository to run this command) to compile the file and then run the program by typing ./helio <fileName>.
+You can download the helio compiled executable file and run it in your Unix environement by typing `./helio <fileName>` (including a fileName means opening an existing file). You may need to press enter a second time for the program to run.
 
+Alternatively you can use the `make` command (must download the Makefile in the repository to run this command) to compile the file and then run the program by typing `./helio <fileName>`.
+
+## Sources
+
+- This project draws inspiration and references from an online tutorial: [Tutorial Link](https://viewsourcecode.org/snaptoken/kilo/04.aTextViewer.html)
+- [VT100 User Guide](https://vt100.net/docs/vt100-ug/contents.html)
+
+## License
+
+SPDX-License-Identifier: MIT
+See the LICENSE file in the project root for full license information.
 

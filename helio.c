@@ -3,11 +3,14 @@
  * Description:
  *  - A text editor program developed in C99, designed to interface with the Linux terminal. It
  *    utilizes escape sequence commands; for reference, consult the VT100 user guide:
- *    http://vt100.net/docs/vt100-ug/chapter3.html
+ *    https://vt100.net/docs/vt100-ug/contents.html
  *
  * Sources:
  *  - This project draws inspiration and references from an online tutorial:
- *    [Tutorial Link](https://viewsourcecode.org/snaptoken/kilo/04.aTextViewer.html)
+ *    Tutorial Link: https://viewsourcecode.org/snaptoken/kilo/04.aTextViewer.html
+ *
+ * SPDX-License-Identifier: MIT
+ * See the LICENSE file in the project root for full license information.
  ****************************************************************************************************/
 
 //====================Includes====================//
